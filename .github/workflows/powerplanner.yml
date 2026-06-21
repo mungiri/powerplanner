@@ -1,0 +1,66 @@
+name: 파워플래너 전기요금 알림
+
+on:
+  schedule:
+    - cron: "5 * * * *"      # 매시 5분 (UTC 기준이지만 매시간이라 무관)
+  workflow_dispatch:           # 수동 실행 버튼 (Actions 탭에서 Run workflow)
+
+permissions:
+  contents: read
+
+# 동시에 한 번만 (겹쳐 실행 방지)
+concurrency:
+  group: powerplanner
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: Playwright 브라우저 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.60.0
+
+      - name: Chromium 설치
+        run: python -m playwright install --with-deps chromium
+
+      # 직전 요금값(state.json)을 캐시에서 복원 → 변동 시에만 알림 가능
+      - name: 상태 복원
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: pp-state-${{ github.run_id }}
+          restore-keys: pp-state-
+
+      - name: 조회 + 알림
+        env:
+          KEPCO_ID: ${{ secrets.KEPCO_ID }}
+          KEPCO_PW: ${{ secrets.KEPCO_PW }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTIFY_ON_CHANGE_ONLY: "true"
+          HEADLESS: "true"
+        run: python main.py
+
+      # 실패 시 캡처(스크린샷/HTML)를 아티팩트로 올려 원인 파악
+      - name: 실패 시 캡처 업로드
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture
+          path: capture/
+          if-no-files-found: ignore
+          retention-days: 7

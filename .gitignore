@@ -1,0 +1,12 @@
+.env
+venv/
+__pycache__/
+capture/
+state.json
+*.log
+# 저장한 페이지(개인정보 포함)
+*.html
+*_files/
+
+# Claude Code 로컬 설정
+.claude/
