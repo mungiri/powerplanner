@@ -1,9 +1,9 @@
 """파워플래너 전기요금 자동 조회 → 텔레그램 알림.
 
 사용법:
-    python main.py            # 1회 조회 후 알림 (스케줄러가 1시간마다 호출하는 기본 모드)
-    python main.py --capture  # 로그인 후 페이지를 capture/ 에 저장 (셀렉터 튜닝용)
-    python main.py --loop     # 이 프로세스 안에서 1시간마다 반복 (스케줄러 대신 쓰고 싶을 때)
+    python main.py            # 1회 조회 후 알림 (스케줄러가 매시간 호출하는 기본 모드)
+    python main.py --capture  # 로그인 후 페이지를 capture/ 에 저장 (디버그용)
+    python main.py --loop     # 이 프로세스 안에서 1시간마다 반복
 """
 import os
 import sys
@@ -11,7 +11,7 @@ import json
 import time
 import argparse
 import pathlib
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 
@@ -21,6 +21,20 @@ from scraper import login_and_fetch
 from notify import send_telegram
 
 STATE_FILE = pathlib.Path(__file__).parent / "state.json"
+
+# 예상요금이 이 금액(원) 이상이면 경고 메시지 추가
+WARN_THRESHOLD = int(os.getenv("WARN_THRESHOLD", "30000"))
+
+# 한국 표준시 (UTC+9) — GitHub Actions(UTC)에서도 한국 시간으로 표시
+KST = timezone(timedelta(hours=9))
+
+
+def kst_now_str() -> str:
+    """'2026.06.21 오후 07시' 형식의 현재 한국시각."""
+    now = datetime.now(KST)
+    ampm = "오전" if now.hour < 12 else "오후"
+    h12 = now.hour % 12 or 12
+    return f"{now.strftime('%Y.%m.%d')} {ampm} {h12:02d}시"
 
 
 def _load_state() -> dict:
@@ -36,61 +50,89 @@ def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _build_message(data: dict, prev) -> str:
+def build_message(data: dict, prev) -> str:
+    """알림 메시지 본문 생성."""
     amount = data["total_charge"]
     lines = ["⚡ <b>파워플래너 전기요금</b>"]
 
-    if prev is None or prev == amount:
+    # 실시간요금 + 직전(1시간 전) 대비 변동
+    if prev is None:
         lines.append(f"실시간요금: <b>{amount:,}원</b>")
+    elif prev == amount:
+        lines.append(f"실시간요금: <b>{amount:,}원</b> (직전과 동일)")
     else:
         diff = amount - prev
         sign = "▲" if diff > 0 else "▼"
-        lines.append(f"실시간요금: <b>{amount:,}원</b> ({sign}{abs(diff):,}원)")
+        lines.append(f"실시간요금: <b>{amount:,}원</b> (직전 대비 {sign}{abs(diff):,}원)")
 
-    if data.get("predict_charge") is not None:
-        lines.append(f"예상요금: {data['predict_charge']:,}원")
+    pc = data.get("predict_charge")
+    if pc is not None:
+        lines.append(f"예상요금: {pc:,}원")
     if data.get("usage") is not None:
         lines.append(f"사용량: {data['usage']}kWh (예상 {data.get('predict_usage')}kWh)")
-    if data.get("period"):
-        lines.append(f"청구기간: {data['period']}")
-    if data.get("as_of"):
-        lines.append(f"기준일: {data['as_of']}")
+
+    lines.append(f"기준일: {kst_now_str()}")
+
+    # 예상요금 3만원(WARN_THRESHOLD) 이상 경고
+    if pc is not None and pc >= WARN_THRESHOLD:
+        lines.append("")
+        lines.append(f"🚨 <b>예상요금이 {WARN_THRESHOLD:,}원을 넘었습니다!</b>")
+
     return "\n".join(lines)
 
 
-def run_once() -> None:
+def fetch_data(capture: bool = False) -> dict:
+    """로그인 후 요금 데이터를 조회한다 (상태 갱신·알림 없음)."""
     headless = os.getenv("HEADLESS", "true").lower() != "false"
-    change_only = os.getenv("NOTIFY_ON_CHANGE_ONLY", "true").lower() == "true"
+    return login_and_fetch(headless=headless, capture=capture)
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+def apply_state(data: dict):
+    """state 를 갱신하고 (메시지, 변동여부, 경고진입여부) 를 돌려준다."""
+    state = _load_state()
+    prev = state.get("amount")
+    prev_warned = state.get("warned", False)
+
+    pc = data.get("predict_charge")
+    over = pc is not None and pc >= WARN_THRESHOLD
+
+    msg = build_message(data, prev)
+
+    state["amount"] = data["total_charge"]
+    state["data"] = data
+    state["warned"] = over
+    state["updated_at"] = kst_now_str()
+    _save_state(state)
+
+    changed = prev is None or prev != data["total_charge"]
+    newly_over = over and not prev_warned  # 막 3만원을 넘긴 순간
+    return msg, changed, newly_over
+
+
+def run_once() -> None:
+    change_only = os.getenv("NOTIFY_ON_CHANGE_ONLY", "true").lower() == "true"
+    now = kst_now_str()
+
     try:
-        data = login_and_fetch(headless=headless, capture=False)
+        data = fetch_data()
     except Exception as e:
         send_telegram(f"⚠️ 파워플래너 조회 실패 ({now})\n{e}")
         raise
 
-    amount = data["total_charge"]
-    state = _load_state()
-    prev = state.get("amount")
+    msg, changed, newly_over = apply_state(data)
 
-    state["amount"] = amount
-    state["data"] = data
-    state["updated_at"] = now
-    _save_state(state)
-
-    if change_only and prev == amount:
-        print(f"[{now}] 변동 없음: {amount:,}원 — 알림 생략")
-        return
-
-    send_telegram(_build_message(data, prev))
-    print(f"[{now}] 알림 전송: {amount:,}원")
+    # 변동이 있거나(또는 always 모드), 막 3만원을 넘긴 경우 전송
+    if (not change_only) or changed or newly_over:
+        send_telegram(msg)
+        print(f"[{now}] 알림 전송: {data['total_charge']:,}원")
+    else:
+        print(f"[{now}] 변동 없음 — 알림 생략")
 
 
 def run_capture() -> None:
     print("디버그 캡처 모드: 로그인 후 capture/ 에 스크린샷·HTML 저장")
     data = login_and_fetch(headless=False, capture=True)
     print(f"추출된 데이터: {data}")
-    print("값이 비어있으면 capture/ 의 화면을 보고 로그인/셀렉터를 점검하세요.")
 
 
 def run_loop(interval_sec: int = 3600) -> None:

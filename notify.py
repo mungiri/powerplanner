@@ -3,11 +3,9 @@ import os
 import requests
 
 
-def send_telegram(text: str) -> None:
-    """텔레그램으로 메시지를 보낸다. 토큰/챗ID 미설정 시 조용히 콘솔 출력만 한다."""
+def send_telegram_to(chat_id, text: str) -> None:
+    """지정한 chat_id 로 메시지를 보낸다. 토큰/챗ID 미설정 시 콘솔 출력만."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
     if not token or not chat_id:
         print("[notify] 텔레그램 미설정 — 콘솔 출력만 합니다:\n" + text)
         return
@@ -20,3 +18,8 @@ def send_telegram(text: str) -> None:
     )
     if resp.status_code != 200:
         raise RuntimeError(f"텔레그램 전송 실패 {resp.status_code}: {resp.text}")
+
+
+def send_telegram(text: str) -> None:
+    """기본 수신자(.env 의 TELEGRAM_CHAT_ID)에게 보낸다."""
+    send_telegram_to(os.getenv("TELEGRAM_CHAT_ID"), text)
