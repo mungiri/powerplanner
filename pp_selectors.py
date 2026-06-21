@@ -10,6 +10,11 @@ LOGIN_URL = "https://pp.kepco.co.kr/intro.do"
 # 로그인 후 스마트뷰 메인 (실시간/예상 요금이 표시됨)
 SMARTVIEW_URL = "https://pp.kepco.co.kr/rm/rm0201.do?menu_id=O020101"
 
+# 전기사용량 > 시간대별 페이지 및 차트 데이터 엔드포인트
+USAGE_PAGE_URL = "https://pp.kepco.co.kr/rs/rs0201.do?menu_id=O020201"
+HOURLY_CHART_URL = "https://pp.kepco.co.kr/rs/rs0201_chart.do"
+# 차트 응답 필드: MR_HHMI2(시간라벨), F_AP_QT(사용량 kWh), LDAY_F_AP_QT(전일 동시간)
+
 # --- 로그인 폼 (로그인화면.html 에서 확인한 확정값) ---
 # 버튼 클릭 시 encript() 가 RSA 암호화 후 /login 으로 POST 한다 → 칸 채우고 버튼만 누르면 됨.
 ID_SELECTORS = ["#RSA_USER_ID"]

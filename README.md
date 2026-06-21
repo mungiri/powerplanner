@@ -99,3 +99,17 @@ python3 main.py
 | `run.sh` | 스케줄러용 실행 래퍼 |
 | `com.user.powerplanner.plist` | 맥 launchd (1시간 주기) |
 | `state.json` | 직전 요금 값 저장 (자동 생성) |
+| `daily_report.py` | 하루 시간대별 사용량 그래프 생성·전송 (자정 자동) |
+| `graph.py` | matplotlib 막대그래프 렌더링 |
+| `bot.py` | 텔레그램 명령(`/now`, `/graph`) 리스너 |
+
+## 일일 그래프 (자정 자동)
+
+매일 자정 직후 GitHub Actions(`daily-graph.yml`, 00:05 KST)가 **어제 하루 24시간 사용량 그래프**를 텔레그램으로 보냅니다.
+수동: Actions → "파워플래너 일일 사용량 그래프" → Run workflow (날짜 입력 가능).
+로컬: `python daily_report.py [YYYY-MM-DD]`
+
+## 텔레그램 명령 (`bot.py` 실행 중일 때)
+
+- `/now` 또는 `요금` → 지금 요금 조회
+- `/graph` 또는 `그래프` → 오늘 시간대별 사용량 그래프

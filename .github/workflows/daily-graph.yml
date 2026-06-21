@@ -1,0 +1,60 @@
+name: 파워플래너 일일 사용량 그래프
+
+on:
+  schedule:
+    - cron: "5 15 * * *"      # 15:05 UTC = 00:05 KST (자정 직후, 어제 하루 전체)
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "조회할 날짜 (YYYY-MM-DD, 비우면 어제)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: powerplanner-daily
+  cancel-in-progress: false
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: Playwright 브라우저 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.60.0
+
+      - name: Chromium 설치
+        run: python -m playwright install --with-deps chromium
+
+      - name: 그래프 생성 + 전송
+        env:
+          KEPCO_ID: ${{ secrets.KEPCO_ID }}
+          KEPCO_PW: ${{ secrets.KEPCO_PW }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEADLESS: "true"
+        run: python daily_report.py ${{ github.event.inputs.date }}
+
+      - name: 실패 시 캡처 업로드
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-daily
+          path: capture/
+          if-no-files-found: ignore
+          retention-days: 7

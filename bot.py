@@ -17,35 +17,51 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from datetime import datetime, timezone, timedelta
+
 from main import fetch_data, apply_state
-from notify import send_telegram_to
+from notify import send_telegram_to, send_telegram_photo
+from scraper import fetch_hourly_usage
+from graph import render_hourly
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API = f"https://api.telegram.org/bot{TOKEN}"
+KST = timezone(timedelta(hours=9))
 
-TRIGGERS = {"/now", "/요금", "요금", "지금", "조회"}
+NOW_TRIGGERS = {"/now", "/요금", "요금", "지금", "조회"}
+GRAPH_TRIGGERS = {"/graph", "그래프", "/그래프", "사용량", "오늘그래프"}
 HELP = (
     "⚡ 파워플래너 요금봇\n"
-    "/now (또는 '요금', '지금') 보내면 지금 바로 조회해서 알려드려요.\n"
-    "매시간 자동 알림은 따로 돌아갑니다."
+    "/now (또는 '요금') → 지금 요금 조회\n"
+    "/graph (또는 '그래프') → 오늘 시간대별 사용량 그래프\n"
+    "매시간 요금 알림·자정 일일그래프는 자동으로 따로 돌아갑니다."
 )
 
 
 def handle(chat_id, text: str):
     text = (text or "").strip()
+    low = text.lower()
     if text in ("/start", "/help", "도움말"):
         send_telegram_to(chat_id, HELP)
-        return
-    if text.lower() in {t.lower() for t in TRIGGERS}:
-        send_telegram_to(chat_id, "⏳ 조회 중이에요… (약 15초)")
+    elif low in {t.lower() for t in NOW_TRIGGERS}:
+        send_telegram_to(chat_id, "⏳ 요금 조회 중이에요… (약 15초)")
         try:
             data = fetch_data()
             msg, _changed, _over = apply_state(data)
             send_telegram_to(chat_id, msg)
         except Exception as e:
             send_telegram_to(chat_id, f"⚠️ 조회 실패\n{e}")
+    elif low in {t.lower() for t in GRAPH_TRIGGERS}:
+        send_telegram_to(chat_id, "⏳ 오늘 사용량 그래프 그리는 중이에요…")
+        try:
+            today = datetime.now(KST).strftime("%Y-%m-%d")
+            hd = fetch_hourly_usage(today)
+            png = render_hourly(hd)
+            send_telegram_photo(png, f"📊 오늘({today}) 시간대별 사용량 (현재까지 {hd['total']:g} kWh)", chat_id)
+        except Exception as e:
+            send_telegram_to(chat_id, f"⚠️ 그래프 실패\n{e}")
     else:
-        send_telegram_to(chat_id, "명령을 못 알아들었어요. /now 또는 '요금' 이라고 보내보세요.")
+        send_telegram_to(chat_id, "명령을 못 알아들었어요. /now (요금) 또는 /graph (그래프) 를 보내보세요.")
 
 
 def main():

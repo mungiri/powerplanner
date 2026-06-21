@@ -10,3 +10,6 @@ state.json
 
 # Claude Code 로컬 설정
 .claude/
+
+# 생성된 그래프
+out/
