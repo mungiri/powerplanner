@@ -50,28 +50,28 @@ def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def build_message(data: dict, prev) -> str:
-    """알림 메시지 본문 생성."""
-    amount = data["total_charge"]
-    lines = ["⚡ <b>파워플래너 전기요금</b>"]
+def build_message(data: dict, prev_data, window_label: str = "직전 조회 이후") -> str:
+    """알림 메시지 본문 생성.
 
-    # 실시간요금 + 직전(1시간 전) 대비 변동
-    if prev is None:
-        lines.append(f"실시간요금: <b>{amount:,}원</b>")
-    elif prev == amount:
-        lines.append(f"실시간요금: <b>{amount:,}원</b> (직전과 동일)")
-    else:
-        diff = amount - prev
-        sign = "▲" if diff > 0 else "▼"
-        lines.append(f"실시간요금: <b>{amount:,}원</b> (직전 대비 {sign}{abs(diff):,}원)")
+    prev_data: 직전 조회 때 저장한 data dict (없으면 None).
+    실시간요금·사용량은 '청구월 누적값'이라, 그 차이가 이번 구간(약 6시간) 사용분이다.
+    """
+    amount = data["total_charge"]
+    lines = [f"⚡ <b>파워플래너 전기요금</b>  ({kst_now_str()})"]
+
+    # 이번 구간(약 6시간) 동안 쓴 사용량 / 요금 = 누적값의 차이
+    if prev_data:
+        d_usage = round((data.get("usage") or 0) - (prev_data.get("usage") or 0), 3)
+        d_charge = amount - (prev_data.get("total_charge") or 0)
+        if d_usage >= 0 and d_charge >= 0:  # 월 초기화 시엔 음수 → 표시 생략
+            lines.append(f"🔸 <b>{window_label}: {d_usage:g} kWh / {d_charge:,}원</b>")
 
     pc = data.get("predict_charge")
+    lines.append(f"누적 실시간요금: {amount:,}원")
     if pc is not None:
-        lines.append(f"예상요금: {pc:,}원")
+        lines.append(f"예상요금(월말): {pc:,}원")
     if data.get("usage") is not None:
-        lines.append(f"사용량: {data['usage']}kWh (예상 {data.get('predict_usage')}kWh)")
-
-    lines.append(f"기준일: {kst_now_str()}")
+        lines.append(f"누적 사용량: {data['usage']}kWh")
 
     # 예상요금 3만원(WARN_THRESHOLD) 이상 경고
     if pc is not None and pc >= WARN_THRESHOLD:
@@ -91,17 +91,31 @@ def apply_state(data: dict):
     """state 를 갱신하고 (메시지, 변동여부, 경고진입여부) 를 돌려준다."""
     state = _load_state()
     prev = state.get("amount")
+    prev_data = state.get("data")
     prev_warned = state.get("warned", False)
+
+    # 직전 조회로부터 경과 시간 → "지난 N시간" 라벨
+    window_label = "직전 조회 이후"
+    prev_iso = state.get("ts")
+    now_dt = datetime.now(KST)
+    if prev_iso:
+        try:
+            elapsed_h = (now_dt - datetime.fromisoformat(prev_iso)).total_seconds() / 3600
+            if elapsed_h >= 0.5:
+                window_label = f"지난 {round(elapsed_h)}시간"
+        except Exception:
+            pass
 
     pc = data.get("predict_charge")
     over = pc is not None and pc >= WARN_THRESHOLD
 
-    msg = build_message(data, prev)
+    msg = build_message(data, prev_data, window_label)
 
     state["amount"] = data["total_charge"]
     state["data"] = data
     state["warned"] = over
     state["updated_at"] = kst_now_str()
+    state["ts"] = now_dt.isoformat()
     _save_state(state)
 
     changed = prev is None or prev != data["total_charge"]
