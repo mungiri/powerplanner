@@ -59,28 +59,37 @@ def build_message(data: dict, prev_data, window_label="직전 조회 이후", br
     """
     amount = data["total_charge"]
     pc = data.get("predict_charge")
+    usage = data.get("usage")
+    # 한전 차트 API는 시간당 kWh만 주고 요금(원)은 안 줘서, 누적 평균단가로 환산한다.
+    rate = (amount / usage) if (usage and usage > 0) else 0
+
     lines = [f"🏡💡 <b>우리집 전기요금</b>  ({kst_now_str()})"]
 
-    # 1) 직전 조회 이후 (이번 구간 사용량/요금 = 누적값 차이)
-    if prev_data:
-        d_usage = round((data.get("usage") or 0) - (prev_data.get("usage") or 0), 3)
+    # 1) 지난 N시간 — 구간 합계 사용량 / 요금
+    if breakdown:
+        w_kwh = round(sum(u for _, u in breakdown), 3)
+        w_won = round(w_kwh * rate)
+        lines.append(f"🐣 <b>{window_label}: {w_kwh:g} kWh / {w_won:,}원</b>")
+    elif prev_data:
+        d_usage = round((usage or 0) - (prev_data.get("usage") or 0), 3)
         d_charge = amount - (prev_data.get("total_charge") or 0)
-        if d_usage >= 0 and d_charge >= 0:  # 월 초기화 시엔 음수 → 생략
-            lines.append(f"🐣 <b>{window_label}: {d_usage:g} kWh · {d_charge:,}원</b>")
+        if d_usage >= 0 and d_charge >= 0:
+            lines.append(f"🐣 <b>{window_label}: {d_usage:g} kWh / {d_charge:,}원</b>")
 
-    # 2) 누적 실시간요금  3) 누적 사용량  4) 예상요금(월말)
-    lines.append(f"💰 누적 실시간요금: {amount:,}원")
-    if data.get("usage") is not None:
-        lines.append(f"🔋 누적 사용량: {data['usage']:g} kWh")
+    # 2) 누적 (한 줄, 슬래시 구분)  3) 예상요금(월말)
+    if usage is not None:
+        lines.append(f"💰 누적: {usage:g} kWh / {amount:,}원")
+    else:
+        lines.append(f"💰 누적 실시간요금: {amount:,}원")
     if pc is not None:
         lines.append(f"🔮 예상요금(월말): {pc:,}원")
 
-    # 이번 구간 시간대별 내역
+    # 4) 이번 구간 시간대별 (kWh / 원)
     if breakdown:
         lines.append("")
         lines.append("⏰ <b>시간대별 사용량</b>")
         for hour, u in breakdown:
-            lines.append(f"  ⤷ {hour}시: {u:g} kWh")
+            lines.append(f"  ⤷ {hour}시: {u:g} kWh / {round(u * rate):,}원")
 
     # 예상요금 3만원(WARN_THRESHOLD) 이상 경고
     if pc is not None and pc >= WARN_THRESHOLD:
