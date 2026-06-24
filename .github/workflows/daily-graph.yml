@@ -1,8 +1,7 @@
 name: 파워플래너 일일 사용량 그래프
 
 on:
-  schedule:
-    - cron: "5 15 * * *"      # 15:05 UTC = 00:05 KST (자정 직후, 어제 하루 전체)
+  # 실행 타이밍은 외부 크론(cron-job.org)이 결정한다 (현재: 매일 06:00 KST, 전날 그래프).
   workflow_dispatch:
     inputs:
       date:
