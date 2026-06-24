@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from scraper import login_and_fetch
+from scraper import login_and_fetch, fetch_hourly_usage, fetch_summary_and_hourly
 from notify import send_telegram
 
 STATE_FILE = pathlib.Path(__file__).parent / "state.json"
@@ -50,76 +50,126 @@ def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def build_message(data: dict, prev_data, window_label: str = "직전 조회 이후") -> str:
+def build_message(data: dict, prev_data, window_label="직전 조회 이후", breakdown=None) -> str:
     """알림 메시지 본문 생성.
 
     prev_data: 직전 조회 때 저장한 data dict (없으면 None).
-    실시간요금·사용량은 '청구월 누적값'이라, 그 차이가 이번 구간(약 6시간) 사용분이다.
+    breakdown: 이번 구간의 [(시각, kWh), ...] 시간대별 내역.
+    실시간요금·사용량은 '청구월 누적값'이라, 그 차이가 이번 구간 사용분이다.
     """
     amount = data["total_charge"]
-    lines = [f"⚡ <b>파워플래너 전기요금</b>  ({kst_now_str()})"]
+    pc = data.get("predict_charge")
+    lines = [f"🏡💡 <b>우리집 전기요금</b>  ({kst_now_str()})"]
 
-    # 이번 구간(약 6시간) 동안 쓴 사용량 / 요금 = 누적값의 차이
+    # 1) 직전 조회 이후 (이번 구간 사용량/요금 = 누적값 차이)
     if prev_data:
         d_usage = round((data.get("usage") or 0) - (prev_data.get("usage") or 0), 3)
         d_charge = amount - (prev_data.get("total_charge") or 0)
-        if d_usage >= 0 and d_charge >= 0:  # 월 초기화 시엔 음수 → 표시 생략
-            lines.append(f"🔸 <b>{window_label}: {d_usage:g} kWh / {d_charge:,}원</b>")
+        if d_usage >= 0 and d_charge >= 0:  # 월 초기화 시엔 음수 → 생략
+            lines.append(f"🐣 <b>{window_label}: {d_usage:g} kWh · {d_charge:,}원</b>")
 
-    pc = data.get("predict_charge")
-    lines.append(f"누적 실시간요금: {amount:,}원")
-    if pc is not None:
-        lines.append(f"예상요금(월말): {pc:,}원")
+    # 2) 누적 실시간요금  3) 누적 사용량  4) 예상요금(월말)
+    lines.append(f"💰 누적 실시간요금: {amount:,}원")
     if data.get("usage") is not None:
-        lines.append(f"누적 사용량: {data['usage']}kWh")
+        lines.append(f"🔋 누적 사용량: {data['usage']:g} kWh")
+    if pc is not None:
+        lines.append(f"🔮 예상요금(월말): {pc:,}원")
+
+    # 이번 구간 시간대별 내역
+    if breakdown:
+        lines.append("")
+        lines.append("⏰ <b>시간대별 사용량</b>")
+        for hour, u in breakdown:
+            lines.append(f"  ⤷ {hour}시: {u:g} kWh")
 
     # 예상요금 3만원(WARN_THRESHOLD) 이상 경고
     if pc is not None and pc >= WARN_THRESHOLD:
         lines.append("")
-        lines.append(f"🚨 <b>예상요금이 {WARN_THRESHOLD:,}원을 넘었습니다!</b>")
+        lines.append(f"🚨 <b>예상요금이 {WARN_THRESHOLD:,}원을 넘었어요!</b>")
 
     return "\n".join(lines)
 
 
-def fetch_data(capture: bool = False) -> dict:
-    """로그인 후 요금 데이터를 조회한다 (상태 갱신·알림 없음)."""
+def _window_slots(prev_dt: datetime, now_dt: datetime):
+    """prev_dt~now_dt 사이의 '완료된 1시간 슬롯'을 (날짜, 시각라벨) 목록으로.
+
+    시각라벨은 차트의 MR_HHMI2 와 동일(끝시각, 1~24). 자정(00:00)은 전날의 24시.
+    """
+    slots = []
+    e = now_dt.replace(minute=0, second=0, microsecond=0)  # 마지막 정시 경계
+    start = prev_dt.replace(minute=0, second=0, microsecond=0)
+    cur = start + timedelta(hours=1)
+    guard = 0
+    while cur <= e and guard < 48:
+        guard += 1
+        if cur.hour == 0:  # 자정 경계 = 전날 24시 슬롯
+            d = (cur - timedelta(days=1)).strftime("%Y-%m-%d")
+            label = 24
+        else:
+            d = cur.strftime("%Y-%m-%d")
+            label = cur.hour
+        slots.append((d, label))
+        cur += timedelta(hours=1)
+    return slots
+
+
+def compose(persist: bool = True):
+    """로그인→요약+이번 구간 시간대별 내역 수집→메시지 생성.
+
+    persist=True 면 state(누적값·ts) 를 갱신한다.
+    반환: (메시지, 변동여부, 경고진입여부)
+    """
     headless = os.getenv("HEADLESS", "true").lower() != "false"
-    return login_and_fetch(headless=headless, capture=capture)
 
-
-def apply_state(data: dict):
-    """state 를 갱신하고 (메시지, 변동여부, 경고진입여부) 를 돌려준다."""
     state = _load_state()
     prev = state.get("amount")
     prev_data = state.get("data")
     prev_warned = state.get("warned", False)
-
-    # 직전 조회로부터 경과 시간 → "지난 N시간" 라벨
-    window_label = "직전 조회 이후"
     prev_iso = state.get("ts")
+
     now_dt = datetime.now(KST)
+    prev_dt = None
     if prev_iso:
         try:
-            elapsed_h = (now_dt - datetime.fromisoformat(prev_iso)).total_seconds() / 3600
-            if elapsed_h >= 0.5:
-                window_label = f"지난 {round(elapsed_h)}시간"
+            prev_dt = datetime.fromisoformat(prev_iso)
         except Exception:
-            pass
+            prev_dt = None
+    if prev_dt is None:
+        prev_dt = now_dt - timedelta(hours=6)
+
+    today = now_dt.strftime("%Y-%m-%d")
+    data, hourly_today = fetch_summary_and_hourly(today, headless=headless)
+
+    # 이번 구간의 시간대별 내역 모으기 (필요한 날짜만 추가 조회)
+    hourly_by_date = {today: hourly_today}
+    breakdown = []
+    for d, label in _window_slots(prev_dt, now_dt):
+        if d not in hourly_by_date:
+            try:
+                hourly_by_date[d] = fetch_hourly_usage(d, headless=headless)
+            except Exception:
+                hourly_by_date[d] = {"hours": [], "usage": []}
+        umap = dict(zip(hourly_by_date[d]["hours"], hourly_by_date[d]["usage"]))
+        if label in umap:
+            breakdown.append((label, umap[label]))
+
+    elapsed_h = (now_dt - prev_dt).total_seconds() / 3600
+    window_label = f"지난 {round(elapsed_h)}시간" if elapsed_h >= 0.5 else "직전 조회 이후"
+
+    msg = build_message(data, prev_data, window_label, breakdown)
 
     pc = data.get("predict_charge")
     over = pc is not None and pc >= WARN_THRESHOLD
-
-    msg = build_message(data, prev_data, window_label)
-
-    state["amount"] = data["total_charge"]
-    state["data"] = data
-    state["warned"] = over
-    state["updated_at"] = kst_now_str()
-    state["ts"] = now_dt.isoformat()
-    _save_state(state)
+    if persist:
+        state["amount"] = data["total_charge"]
+        state["data"] = data
+        state["warned"] = over
+        state["updated_at"] = kst_now_str()
+        state["ts"] = now_dt.isoformat()
+        _save_state(state)
 
     changed = prev is None or prev != data["total_charge"]
-    newly_over = over and not prev_warned  # 막 3만원을 넘긴 순간
+    newly_over = over and not prev_warned
     return msg, changed, newly_over
 
 
@@ -128,17 +178,15 @@ def run_once() -> None:
     now = kst_now_str()
 
     try:
-        data = fetch_data()
+        msg, changed, newly_over = compose(persist=True)
     except Exception as e:
         send_telegram(f"⚠️ 파워플래너 조회 실패 ({now})\n{e}")
         raise
 
-    msg, changed, newly_over = apply_state(data)
-
     # 변동이 있거나(또는 always 모드), 막 3만원을 넘긴 경우 전송
     if (not change_only) or changed or newly_over:
         send_telegram(msg)
-        print(f"[{now}] 알림 전송: {data['total_charge']:,}원")
+        print(f"[{now}] 알림 전송")
     else:
         print(f"[{now}] 변동 없음 — 알림 생략")
 

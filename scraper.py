@@ -105,73 +105,51 @@ def _read_text(page: Page, selector: str, timeout: int = 25000):
     return None
 
 
-def login_and_fetch(headless: bool = True, capture: bool = False):
-    """로그인 후 요금 정보를 dict 로 반환.
+def _read_summary(page: Page, capture: bool = False) -> dict:
+    """로그인된 page 에서 스마트뷰 요금 요약을 읽는다."""
+    page.goto(S.SMARTVIEW_URL, wait_until="domcontentloaded", timeout=30000)
+    if capture:
+        page.wait_for_timeout(4000)
+        _save_capture(page, "after_login")
 
-    반환 예:
-        {
-          "total_charge": 7970, "predict_charge": 19757,
-          "usage": 45.948, "predict_usage": 124.428,
-          "period": "2026.06.11 ~ 2026.07.10", "as_of": "2026.06.21",
-        }
-    실패 시 RuntimeError.
-    """
-    with _logged_in_page(headless) as (page, _browser):
-        # 스마트뷰 메인으로 이동
-        page.goto(S.SMARTVIEW_URL, wait_until="domcontentloaded", timeout=30000)
+    total_txt = _read_text(page, S.EL_TOTAL_CHARGE)
+    predict_txt = _read_text(page, S.EL_PREDICT_TOTAL_CHARGE)
+    usage_txt = _read_text(page, S.EL_USAGE)
+    predict_usage_txt = _read_text(page, S.EL_PREDICT_USAGE)
+    start_dt = _read_text(page, S.EL_START_DT, timeout=5000)
+    select_dt = _read_text(page, S.EL_SELECT_DT, timeout=5000)
+    end_dt = _read_text(page, S.EL_END_DT, timeout=5000)
 
-        if capture:
-            page.wait_for_timeout(4000)
-            _save_capture(page, "after_login")
-
-        # JS 가 채운 요금 값 읽기
-        total_txt = _read_text(page, S.EL_TOTAL_CHARGE)
-        predict_txt = _read_text(page, S.EL_PREDICT_TOTAL_CHARGE)
-        usage_txt = _read_text(page, S.EL_USAGE)
-        predict_usage_txt = _read_text(page, S.EL_PREDICT_USAGE)
-        start_dt = _read_text(page, S.EL_START_DT, timeout=5000)
-        select_dt = _read_text(page, S.EL_SELECT_DT, timeout=5000)
-        end_dt = _read_text(page, S.EL_END_DT, timeout=5000)
-
-        total_charge = _num(total_txt)
-        if total_charge is None:
-            _save_capture(page, "charge_not_found")
-            raise RuntimeError(
-                "요금(#TOTAL_CHARGE)을 읽지 못했습니다. 로그인이 실패했거나 "
-                "화면 구조가 바뀌었을 수 있습니다. capture/ 를 확인하세요."
-            )
-
-        return {
-            "total_charge": total_charge,
-            "predict_charge": _num(predict_txt),
-            "usage": _num(usage_txt),
-            "predict_usage": _num(predict_usage_txt),
-            "period": f"{start_dt} ~ {end_dt}" if start_dt and end_dt else None,
-            "as_of": select_dt,
-        }
-
-
-def fetch_hourly_usage(date_str: str, headless: bool = True):
-    """지정 날짜(YYYY-MM-DD)의 시간대별 사용량을 조회.
-
-    반환: {"date": "2026-06-21", "hours": [0..], "usage": [kWh..],
-           "prev_day": [전일 kWh..], "total": 합계}
-    """
-    param = {"SELECT_DT": date_str, "selectType": "all", "TIME_TYPE": "1"}
-
-    with _logged_in_page(headless) as (page, _browser):
-        # 세션 쿠키를 가진 채로 차트 데이터 엔드포인트에 직접 POST
-        page.goto(S.USAGE_PAGE_URL, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(1000)
-        resp = page.request.post(
-            S.HOURLY_CHART_URL,
-            data=json.dumps(param),
-            headers={"Content-Type": "application/json"},
+    total_charge = _num(total_txt)
+    if total_charge is None:
+        _save_capture(page, "charge_not_found")
+        raise RuntimeError(
+            "요금(#TOTAL_CHARGE)을 읽지 못했습니다. 로그인이 실패했거나 "
+            "화면 구조가 바뀌었을 수 있습니다. capture/ 를 확인하세요."
         )
-        if not resp.ok:
-            raise RuntimeError(f"시간대별 조회 실패 {resp.status}")
-        rows = resp.json()
+    return {
+        "total_charge": total_charge,
+        "predict_charge": _num(predict_txt),
+        "usage": _num(usage_txt),
+        "predict_usage": _num(predict_usage_txt),
+        "period": f"{start_dt} ~ {end_dt}" if start_dt and end_dt else None,
+        "as_of": select_dt,
+    }
 
+
+def _read_hourly(page: Page, date_str: str) -> dict:
+    """로그인된 page 에서 date_str 의 시간대별 사용량을 차트 API 로 가져온다."""
+    param = {"SELECT_DT": date_str, "selectType": "all", "TIME_TYPE": "1"}
+    page.goto(S.USAGE_PAGE_URL, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(1000)
+    resp = page.request.post(
+        S.HOURLY_CHART_URL,
+        data=json.dumps(param),
+        headers={"Content-Type": "application/json"},
+    )
+    if not resp.ok:
+        raise RuntimeError(f"시간대별 조회 실패 {resp.status}")
+    rows = resp.json()
     if not rows:
         raise RuntimeError("시간대별 데이터가 비어있습니다.")
 
@@ -187,6 +165,26 @@ def fetch_hourly_usage(date_str: str, headless: bool = True):
     total = round(sum(usage), 3)
     return {"date": date_str, "hours": hours, "usage": usage,
             "prev_day": prev_day, "total": total}
+
+
+def login_and_fetch(headless: bool = True, capture: bool = False):
+    """로그인 후 요금 요약 dict 를 반환."""
+    with _logged_in_page(headless) as (page, _browser):
+        return _read_summary(page, capture=capture)
+
+
+def fetch_hourly_usage(date_str: str, headless: bool = True):
+    """지정 날짜(YYYY-MM-DD)의 시간대별 사용량 dict 를 반환."""
+    with _logged_in_page(headless) as (page, _browser):
+        return _read_hourly(page, date_str)
+
+
+def fetch_summary_and_hourly(date_str: str, headless: bool = True):
+    """한 번의 로그인으로 (요금요약, date_str 시간대별) 을 함께 반환."""
+    with _logged_in_page(headless) as (page, _browser):
+        summary = _read_summary(page)
+        hourly = _read_hourly(page, date_str)
+        return summary, hourly
 
 
 def _save_capture(page: Page, tag: str) -> None:

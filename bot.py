@@ -19,7 +19,7 @@ load_dotenv()
 
 from datetime import datetime, timezone, timedelta
 
-from main import fetch_data, apply_state
+from main import compose
 from notify import send_telegram_to, send_telegram_photo
 from scraper import fetch_hourly_usage
 from graph import render_hourly
@@ -46,8 +46,8 @@ def handle(chat_id, text: str):
     elif low in {t.lower() for t in NOW_TRIGGERS}:
         send_telegram_to(chat_id, "⏳ 요금 조회 중이에요… (약 15초)")
         try:
-            data = fetch_data()
-            msg, _changed, _over = apply_state(data)
+            # persist=False: 즉석 조회는 6시간 구간 기준점(ts)을 건드리지 않음
+            msg, _changed, _over = compose(persist=False)
             send_telegram_to(chat_id, msg)
         except Exception as e:
             send_telegram_to(chat_id, f"⚠️ 조회 실패\n{e}")
