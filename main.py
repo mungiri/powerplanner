@@ -149,10 +149,13 @@ def compose(persist: bool = True):
     today = now_dt.strftime("%Y-%m-%d")
     data, hourly_today = fetch_summary_and_hourly(today, headless=headless)
 
-    # 이번 구간의 시간대별 내역 모으기 (필요한 날짜만 추가 조회)
+    # 이번 구간의 시간대별 내역 모으기 (필요한 날짜만 추가 조회).
+    # 한전 AMI 수집은 ~1시간 지연되고, 라벨 "N시"는 (N-1)~N시 구간이라
+    # 창을 1시간 당겨 '데이터가 채워진' 직전 6칸을 보낸다.
+    # (예: 12시 실행 → 6~11시, 18시 → 12~17시)
     hourly_by_date = {today: hourly_today}
     breakdown = []
-    for d, label in _window_slots(prev_dt, now_dt):
+    for d, label in _window_slots(prev_dt - timedelta(hours=1), now_dt - timedelta(hours=1)):
         if d not in hourly_by_date:
             try:
                 hourly_by_date[d] = fetch_hourly_usage(d, headless=headless)
