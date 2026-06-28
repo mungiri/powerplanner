@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from scraper import login_and_fetch, fetch_hourly_usage, fetch_summary_and_hourly
+from scraper import login_and_fetch, fetch_summary_and_hourly_dates
 from notify import send_telegram
 
 STATE_FILE = pathlib.Path(__file__).parent / "state.json"
@@ -147,21 +147,22 @@ def compose(persist: bool = True):
         prev_dt = now_dt - timedelta(hours=6)
 
     today = now_dt.strftime("%Y-%m-%d")
-    data, hourly_today = fetch_summary_and_hourly(today, headless=headless)
 
-    # 이번 구간의 시간대별 내역 모으기 (필요한 날짜만 추가 조회).
+    # 이번 구간 슬롯 계산.
     # 한전 AMI 수집은 ~1시간 지연되고, 라벨 "N시"는 (N-1)~N시 구간이라
     # 창을 1시간 당겨 '데이터가 채워진' 직전 6칸을 보낸다.
-    # (예: 12시 실행 → 6~11시, 18시 → 12~17시)
-    hourly_by_date = {today: hourly_today}
+    # (예: 12시 실행 → 6~11시, 18시 → 12~17시, 자정 → 전날 18~23시)
+    slots = _window_slots(prev_dt - timedelta(hours=1), now_dt - timedelta(hours=1))
+
+    # 필요한 모든 날짜(오늘 + 자정처럼 전날까지)를 로그인 1회로 조회 → 두 번째 로그인 실패로
+    # 자정 시간대별이 통째로 비는 문제 방지.
+    needed_dates = [today] + [d for d, _ in slots]
+    data, hourly_by_date = fetch_summary_and_hourly_dates(needed_dates, headless=headless)
+
     breakdown = []
-    for d, label in _window_slots(prev_dt - timedelta(hours=1), now_dt - timedelta(hours=1)):
-        if d not in hourly_by_date:
-            try:
-                hourly_by_date[d] = fetch_hourly_usage(d, headless=headless)
-            except Exception:
-                hourly_by_date[d] = {"hours": [], "usage": []}
-        umap = dict(zip(hourly_by_date[d]["hours"], hourly_by_date[d]["usage"]))
+    for d, label in slots:
+        hd = hourly_by_date.get(d) or {"hours": [], "usage": []}
+        umap = dict(zip(hd["hours"], hd["usage"]))
         if label in umap:
             breakdown.append((label, umap[label]))
 

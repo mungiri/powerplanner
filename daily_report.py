@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from scraper import fetch_hourly_usage
+from scraper import fetch_summary_and_hourly
 from graph import render_hourly
 from notify import send_telegram_photo, send_telegram
 
@@ -28,7 +28,7 @@ def _yesterday_kst() -> str:
 def run(date_str: str) -> None:
     headless = os.getenv("HEADLESS", "true").lower() != "false"
     try:
-        data = fetch_hourly_usage(date_str, headless=headless)
+        summary, data = fetch_summary_and_hourly(date_str, headless=headless)
     except Exception as e:
         send_telegram(f"⚠️ 일일 그래프 조회 실패 ({date_str})\n{e}")
         raise
@@ -41,9 +41,15 @@ def run(date_str: str) -> None:
     peak_i = max(range(len(usage)), key=lambda i: usage[i]) if usage else 0
     peak_hour = data["hours"][peak_i] if usage else "-"
 
+    # 하루 요금: 한전이 일일 요금은 안 줘서 누적 평균단가(누적요금÷누적사용량)로 환산
+    cum_usage = summary.get("usage")
+    cum_charge = summary.get("total_charge")
+    rate = (cum_charge / cum_usage) if (cum_usage and cum_charge) else 0
+    day_cost = round(total * rate)
+
     caption_lines = [
         f"📊 <b>{date_str} 하루 전력 사용량</b>",
-        f"총 사용량: <b>{total:g} kWh</b>",
+        f"총 사용량: <b>{total:g} kWh / 약 {day_cost:,}원</b>",
         f"최대 시간대: {peak_hour}시 ({usage[peak_i]:g} kWh)" if usage else "",
     ]
     if prev_total:

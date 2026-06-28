@@ -187,6 +187,23 @@ def fetch_summary_and_hourly(date_str: str, headless: bool = True):
         return summary, hourly
 
 
+def fetch_summary_and_hourly_dates(dates, headless: bool = True):
+    """한 번의 로그인으로 (요금요약, {날짜: 시간대별}) 을 반환.
+
+    자정 메시지처럼 여러 날짜가 필요해도 로그인 1회로 처리한다.
+    개별 날짜 조회 실패는 빈 데이터로 둔다(전체 실패 방지).
+    """
+    with _logged_in_page(headless) as (page, _browser):
+        summary = _read_summary(page)
+        hourly = {}
+        for d in dict.fromkeys(dates):  # 중복 제거, 순서 유지
+            try:
+                hourly[d] = _read_hourly(page, d)
+            except Exception:
+                hourly[d] = {"date": d, "hours": [], "usage": [], "prev_day": [], "total": 0}
+        return summary, hourly
+
+
 def _save_capture(page: Page, tag: str) -> None:
     CAPTURE_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
