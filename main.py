@@ -137,37 +137,46 @@ def compose(persist: bool = True):
     prev_iso = state.get("ts")
 
     now_dt = datetime.now(KST)
-    prev_dt = None
-    if prev_iso:
-        try:
-            prev_dt = datetime.fromisoformat(prev_iso)
-        except Exception:
-            prev_dt = None
-    if prev_dt is None:
-        prev_dt = now_dt - timedelta(hours=6)
-
     today = now_dt.strftime("%Y-%m-%d")
 
-    # 이번 구간 슬롯 계산.
-    # 한전 AMI 수집은 ~1시간 지연되고, 라벨 "N시"는 (N-1)~N시 구간이라
-    # 창을 1시간 당겨 '데이터가 채워진' 직전 6칸을 보낸다.
-    # (예: 12시 실행 → 6~11시, 18시 → 12~17시, 자정 → 전날 18~23시)
-    slots = _window_slots(prev_dt - timedelta(hours=1), now_dt - timedelta(hours=1))
+    # 윈도우 시작점 = 마지막으로 '실제 보고한' 슬롯의 끝 시각.
+    # 벽시계(now-N시간)가 아니라 보고 지점을 기준으로 이어가야,
+    # AMI 지연으로 비어 있던 칸이 나중에 채워졌을 때 누락 없이 따라잡는다.
+    last_iso = state.get("last_slot_end") or prev_iso
+    last_end = None
+    if last_iso:
+        try:
+            last_end = datetime.fromisoformat(last_iso)
+        except Exception:
+            last_end = None
+    if last_end is None:
+        last_end = now_dt - timedelta(hours=6)
+
+    # 후보 슬롯: 마지막 보고 이후 ~ 지금까지의 '완료된' 1시간 칸.
+    # 한전 AMI는 1~몇 시간 늦게 도착하므로, 끝쪽 미수집 칸은 아래에서 잘라낸다.
+    slots = _window_slots(last_end, now_dt)
 
     # 필요한 모든 날짜(오늘 + 자정처럼 전날까지)를 로그인 1회로 조회 → 두 번째 로그인 실패로
     # 자정 시간대별이 통째로 비는 문제 방지.
     needed_dates = [today] + [d for d, _ in slots]
     data, hourly_by_date = fetch_summary_and_hourly_dates(needed_dates, headless=headless)
 
-    breakdown = []
+    # 슬롯별 사용량 채우기 (차트에 행이 없으면 None).
+    filled = []
     for d, label in slots:
         hd = hourly_by_date.get(d) or {"hours": [], "usage": []}
         umap = dict(zip(hd["hours"], hd["usage"]))
-        if label in umap:
-            breakdown.append((label, umap[label]))
+        filled.append((d, label, umap.get(label)))
 
-    elapsed_h = (now_dt - prev_dt).total_seconds() / 3600
-    window_label = f"지난 {round(elapsed_h)}시간" if elapsed_h >= 0.5 else "직전 조회 이후"
+    # 꼬리에서 '아직 안 들어온' 칸(누락·0) 제거 → 5시 0kwh 같은 빈칸 표기 방지.
+    # 가정용은 기저부하가 있어 실제 0 kWh 시간은 사실상 없음 → 끝쪽 0/누락=미수집으로 본다.
+    while filled and (filled[-1][2] is None or filled[-1][2] <= 0):
+        filled.pop()
+
+    breakdown = [(label, u if u is not None else 0) for _, label, u in filled]
+
+    n = len(breakdown)
+    window_label = f"지난 {n}시간" if n else "직전 조회 이후"
 
     msg = build_message(data, prev_data, window_label, breakdown)
 
@@ -179,6 +188,12 @@ def compose(persist: bool = True):
         state["warned"] = over
         state["updated_at"] = kst_now_str()
         state["ts"] = now_dt.isoformat()
+        # 이번에 실제로 보고한 마지막 슬롯의 끝 시각을 기억 → 다음 실행이 이어받음.
+        # (이번에 새로 보낸 게 없으면 기존 값 유지 = 다음에 같은 칸 재시도)
+        if filled:
+            d, label, _ = filled[-1]
+            end_dt = datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=KST) + timedelta(hours=label)
+            state["last_slot_end"] = end_dt.isoformat()
         _save_state(state)
 
     changed = prev is None or prev != data["total_charge"]
