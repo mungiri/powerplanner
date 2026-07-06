@@ -1,59 +1,23 @@
-name: 파워플래너 일일 사용량 그래프
+name: 파워플래너 일일 사용량 그래프 (비활성 — 로컬 이전됨)
+
+# ⚠️ 한전이 GitHub Actions 해외 IP 를 차단(2026-07)하여 이 워크플로에서는
+#    조회가 불가능하다. 실제 실행은 한국 IP 인 로컬 PC(Windows 작업 스케줄러)로 이전했다.
+#    cron-job.org 호출이 남아 있어도 아래 job 은 아무 것도 하지 않으므로 실패 알림이 오지 않는다.
 
 on:
-  # 실행 타이밍은 외부 크론(cron-job.org)이 결정한다 (현재: 매일 06:00 KST, 전날 그래프).
   workflow_dispatch:
     inputs:
       date:
-        description: "조회할 날짜 (YYYY-MM-DD, 비우면 어제)"
+        description: "(미사용) 로컬 실행으로 이전됨"
         required: false
         default: ""
 
 permissions:
   contents: read
 
-concurrency:
-  group: powerplanner-daily
-  cancel-in-progress: false
-
 jobs:
-  graph:
+  noop:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-
-      - name: 의존성 설치
-        run: pip install -r requirements.txt
-
-      - name: Playwright 브라우저 캐시
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-1.60.0
-
-      - name: Chromium 설치
-        run: python -m playwright install --with-deps chromium
-
-      - name: 그래프 생성 + 전송
-        env:
-          KEPCO_ID: ${{ secrets.KEPCO_ID }}
-          KEPCO_PW: ${{ secrets.KEPCO_PW }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          HEADLESS: "true"
-        run: python daily_report.py ${{ github.event.inputs.date }}
-
-      - name: 실패 시 캡처 업로드
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: capture-daily
-          path: capture/
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: 안내
+        run: echo "이 워크플로는 로컬 실행으로 이전되어 비활성 상태입니다. (한전 해외 IP 차단)"

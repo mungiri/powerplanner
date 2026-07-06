@@ -12,6 +12,19 @@ from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 
+# pythonw.exe(작업 스케줄러)는 sys.stdout/err 가 None → print 크래시,
+# cp949 콘솔은 한글 인코딩 실패 → 둘 다 방지. (main.py 와 동일)
+_devnull = open(os.devnull, "w", encoding="utf-8")
+for _name in ("stdout", "stderr"):
+    _s = getattr(sys, _name)
+    if _s is None:
+        setattr(sys, _name, _devnull)
+    else:
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 load_dotenv()
 
 from scraper import fetch_summary_and_hourly
@@ -30,7 +43,8 @@ def run(date_str: str) -> None:
     try:
         summary, data = fetch_summary_and_hourly(date_str, headless=headless)
     except Exception as e:
-        send_telegram(f"⚠️ 일일 그래프 조회 실패 ({date_str})\n{e}")
+        import html
+        send_telegram(f"⚠️ 일일 그래프 조회 실패 ({date_str})\n{html.escape(str(e))}")
         raise
 
     png = render_hourly(data)
