@@ -15,6 +15,26 @@ from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 
+# 콘솔 환경 차이로 print 가 죽는 걸 방지:
+#  - pythonw.exe(작업 스케줄러): sys.stdout/err 가 None → print 가 크래시
+#  - cp949 콘솔: 한글/em대시(—) 인코딩 실패 → UnicodeEncodeError
+# None 이면 devnull 로 대체, 있으면 UTF-8 로 고정한다.
+_devnull = open(os.devnull, "w", encoding="utf-8")
+if sys.stdout is None:
+    sys.stdout = _devnull
+else:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr is None:
+    sys.stderr = _devnull
+else:
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 load_dotenv()
 
 from scraper import login_and_fetch, fetch_summary_and_hourly_dates
@@ -208,7 +228,9 @@ def run_once() -> None:
     try:
         msg, changed, newly_over = compose(persist=True)
     except Exception as e:
-        send_telegram(f"⚠️ 파워플래너 조회 실패 ({now})\n{e}")
+        # 에러 텍스트에 '<' 등이 있으면(예: Playwright 배너의 '<3') HTML 파싱 400 이 나므로 이스케이프.
+        import html
+        send_telegram(f"⚠️ 파워플래너 조회 실패 ({now})\n{html.escape(str(e))}")
         raise
 
     # 변동이 있거나(또는 always 모드), 막 3만원을 넘긴 경우 전송
@@ -242,9 +264,18 @@ if __name__ == "__main__":
     ap.add_argument("--once", action="store_true", help="1회 실행 (기본값)")
     args = ap.parse_args()
 
-    if args.capture:
-        run_capture()
-    elif args.loop:
-        run_loop()
-    else:
-        run_once()
+    try:
+        if args.capture:
+            run_capture()
+        elif args.loop:
+            run_loop()
+        else:
+            run_once()
+    except Exception:
+        # 헤드리스 스케줄(pythonw)에선 stdout/err 를 볼 수 없으니 파일로 traceback 남김.
+        import traceback
+        log = pathlib.Path(__file__).parent / "run_error.log"
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"\n=== {datetime.now(KST).isoformat()} ===\n")
+            traceback.print_exc(file=f)
+        raise
