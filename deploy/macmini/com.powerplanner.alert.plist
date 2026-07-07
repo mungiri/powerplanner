@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 전기요금 알림: 매일 00:10 / 06:10 / 12:10 / 18:10 (KST) 실행.
+     __PROJECT_DIR__ 3곳을 실제 클론 경로로 치환한 뒤 ~/Library/LaunchAgents/ 에 설치.
+     (SETUP_MACMINI.md 참고 — sed 로 자동 치환) -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.powerplanner.alert</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PROJECT_DIR__/deploy/macmini/run.sh</string>
+    <string>main.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_DIR__</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>10</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>__PROJECT_DIR__/logs/launchd.alert.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_DIR__/logs/launchd.alert.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

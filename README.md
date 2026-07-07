@@ -10,10 +10,12 @@
 2026-07 부터 한전(pp.kepco.co.kr)이 **GitHub Actions 등 해외/데이터센터 IP 를 차단**합니다.
 증상: 최초 접속(`page.goto`)이 응답 없이 30초 타임아웃 → `⚠️ 조회 실패 Timeout` 알림만 반복.
 
-그래서 이 프로젝트는 **한국 IP 인 로컬 PC(Windows 작업 스케줄러)** 에서 돌립니다.
+그래서 이 프로젝트는 **한국 IP 인 로컬 기기**에서 돌립니다.
 
+- **Windows PC**: 작업 스케줄러 (아래 "자동 실행" 참고)
+- **Mac Mini(24시간 상시)**: [`SETUP_MACMINI.md`](SETUP_MACMINI.md) — launchd 세팅 상세 가이드. **권장**(절전-깨우기 문제 없음)
 - `.github/workflows/*.yml` 은 **비활성(no-op)** 상태입니다. GitHub Actions 로는 조회가 불가능합니다.
-- `run.sh`, `com.user.powerplanner.plist`(맥 launchd), `CRON_EXTERNAL.md`(cron-job.org) 는 **레거시**입니다.
+- `run.sh`, `com.user.powerplanner.plist`(옛 맥 launchd), `CRON_EXTERNAL.md`(cron-job.org) 는 **레거시**입니다.
 
 ---
 
