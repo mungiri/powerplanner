@@ -205,5 +205,5 @@ launchctl list | grep powerplanner   # 아무것도 안 나오면 제거 완료
 
 - 스케줄 시각: 전기요금 알림 **00:10 / 06:10 / 12:10 / 18:10**, 일일그래프 **06:00** (모두 KST).
   바꾸려면 `deploy/macmini/*.plist` 의 `StartCalendarInterval` 수정 후 5단계 재등록.
-- GitHub Actions 워크플로(`.github/workflows/*.yml`)는 **비활성(no-op)** 이며 Mac Mini 실행과 무관합니다.
+- GitHub Actions 방식은 한전 해외 IP 차단으로 **폐기**되어 저장소에 워크플로가 없습니다.
 - Windows 로컬 실행 방법은 `README.md` 참고(이 프로젝트는 원래 Windows 작업 스케줄러로도 돌아갑니다).

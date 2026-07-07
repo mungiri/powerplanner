@@ -12,10 +12,10 @@
 
 그래서 이 프로젝트는 **한국 IP 인 로컬 기기**에서 돌립니다.
 
-- **Windows PC**: 작업 스케줄러 (아래 "자동 실행" 참고)
 - **Mac Mini(24시간 상시)**: [`SETUP_MACMINI.md`](SETUP_MACMINI.md) — launchd 세팅 상세 가이드. **권장**(절전-깨우기 문제 없음)
-- `.github/workflows/*.yml` 은 **비활성(no-op)** 상태입니다. GitHub Actions 로는 조회가 불가능합니다.
-- `run.sh`, `com.user.powerplanner.plist`(옛 맥 launchd), `CRON_EXTERNAL.md`(cron-job.org) 는 **레거시**입니다.
+- **Windows PC**: 작업 스케줄러 (아래 "자동 실행" 참고)
+
+> GitHub Actions·cron-job.org·맥 launchd(구버전) 방식은 한전 해외 IP 차단으로 폐기했습니다.
 
 ---
 
@@ -152,8 +152,7 @@ python main.py --capture   # 브라우저 창이 뜨고 capture/ 에 화면·HTM
 | `get_chat_id.py` | 텔레그램 chat_id 확인 도우미 |
 | `state.json` | 직전 요금값·마지막 보고 시각 저장 (자동 생성) |
 | `run_error.log` | 미처리 예외 traceback (자동 생성) |
-| `.github/workflows/*.yml` | **레거시·비활성** (한전 해외 IP 차단으로 사용 불가) |
-| `run.sh`, `com.user.powerplanner.plist` | **레거시** (맥 launchd용) |
+| `deploy/macmini/` | Mac Mini launchd 배포 파일 ([`SETUP_MACMINI.md`](SETUP_MACMINI.md)) |
 
 ## 텔레그램 명령 (`bot.py` 실행 중일 때)
 
